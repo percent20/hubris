@@ -40,6 +40,37 @@ pub mod task_slot;
 pub mod units;
 pub mod util;
 
+pub trait TaskTableIndexExt {
+    fn checked_from_raw(raw: RawTaskTableIndex) -> Option<TaskTableIndex>;
+}
+
+impl TaskTableIndexExt for TaskTableIndex {
+    fn checked_from_raw(raw: RawTaskTableIndex) -> Option<TaskTableIndex> {
+        if raw > NUM_TASKS as RawTaskTableIndex {
+            None
+        } else {
+            unsafe { Some(TaskTableIndex::unchecked_from_raw(raw)) }
+        }
+    }
+}
+
+pub trait TaskIdExt {
+    fn from_index(index: TaskTableIndex) -> TaskId;
+
+    fn refresh(self) -> TaskId;
+}
+
+impl TaskIdExt for TaskId {
+    fn from_index(index: TaskTableIndex) -> TaskId {
+        let prototype = TaskId::for_index_and_gen(index, Generation::default());
+        sys_refresh_task_id(prototype)
+    }
+
+    fn refresh(self) -> TaskId {
+        sys_refresh_task_id(self)
+    }
+}
+
 #[derive(Debug)]
 #[repr(transparent)]
 pub struct Lease<'a> {
@@ -98,7 +129,7 @@ pub fn sys_send(
     leases: &[Lease<'_>],
 ) -> (u32, usize) {
     let mut args = SendArgs {
-        packed_target_operation: u32::from(target.0) << 16
+        packed_target_operation: u32::from(target.as_raw()) << 16
             | u32::from(operation),
         outgoing_ptr: outgoing.as_ptr(),
         outgoing_len: outgoing.len(),
@@ -218,7 +249,7 @@ pub fn sys_recv(
 
     // Flatten option into a packed u32.
     let specific_sender = specific_sender
-        .map(|tid| (1u32 << 31) | u32::from(tid.0))
+        .map(|tid| (1u32 << 31) | u32::from(tid.as_raw()))
         .unwrap_or(0);
     let mut out = MaybeUninit::<RawRecvMessage>::uninit();
     let rc = unsafe {
@@ -237,7 +268,7 @@ pub fn sys_recv(
 
     if rc == 0 {
         Ok(RecvMessage {
-            sender: TaskId(out.sender as u16),
+            sender: TaskId::from_raw(out.sender as u16),
             operation: out.operation,
             message_len: out.message_len,
             response_capacity: out.response_capacity,
@@ -317,7 +348,12 @@ struct RawRecvMessage {
 #[inline(always)]
 pub fn sys_reply(peer: TaskId, code: u32, message: &[u8]) {
     unsafe {
-        sys_reply_stub(peer.0 as u32, code, message.as_ptr(), message.len())
+        sys_reply_stub(
+            peer.as_raw() as u32,
+            code,
+            message.as_ptr(),
+            message.len(),
+        )
     }
 }
 
@@ -431,7 +467,7 @@ pub fn sys_borrow_read(
     dest: &mut [u8],
 ) -> (u32, usize) {
     let mut args = BorrowReadArgs {
-        lender: lender.0 as u32,
+        lender: lender.as_raw() as u32,
         index,
         offset,
         dest: dest.as_mut_ptr(),
@@ -489,7 +525,7 @@ pub fn sys_borrow_write(
     src: &[u8],
 ) -> (u32, usize) {
     let mut args = BorrowWriteArgs {
-        lender: lender.0 as u32,
+        lender: lender.as_raw() as u32,
         index,
         offset,
         src: src.as_ptr(),
@@ -547,7 +583,7 @@ pub fn sys_borrow_info(lender: TaskId, index: usize) -> (u32, u32, usize) {
 
     let mut raw = MaybeUninit::<RawBorrowInfo>::uninit();
     unsafe {
-        sys_borrow_info_stub(lender.0 as u32, index, raw.as_mut_ptr());
+        sys_borrow_info_stub(lender.as_raw() as u32, index, raw.as_mut_ptr());
     }
     // Safety: stub completely initializes record
     let raw = unsafe { raw.assume_init() };
@@ -858,8 +894,8 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 
 #[inline(always)]
 pub fn sys_refresh_task_id(task_id: TaskId) -> TaskId {
-    let tid = unsafe { sys_refresh_task_id_stub(task_id.0 as u32) };
-    TaskId(tid as u16)
+    let tid = unsafe { sys_refresh_task_id_stub(task_id.as_raw() as u32) };
+    TaskId::from_raw(tid as u16)
 }
 
 /// Core implementation of the REFRESH_TASK_ID syscall.

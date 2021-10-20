@@ -2,8 +2,12 @@
 
 #![no_std]
 
+mod task;
+
 use serde::{Deserialize, Serialize};
 use zerocopy::{AsBytes, FromBytes, Unaligned};
+
+pub use task::*;
 
 /// Magic number that appears at the start of an application header (`App`) to
 /// reassure the kernel that it is not reading uninitialized Flash.
@@ -13,83 +17,6 @@ pub const CURRENT_APP_MAGIC: u32 = 0x1DE_fa7a1;
 /// than the number of regions in the MPU; may be less to improve context switch
 /// performance. (Though note that changing this alters the ABI.)
 pub const REGIONS_PER_TASK: usize = 8;
-
-pub const TASK_ID_INDEX_BITS: usize = 10;
-
-/// Names a particular incarnation of a task.
-///
-/// A `TaskId` combines two fields, a task index (which can be predicted at
-/// compile time) and a task generation number. The generation number begins
-/// counting at zero and wraps on overflow. Critically, the generation number of
-/// a task is incremented when it is restarted. Attempts to correspond with a
-/// task using an outdated generation number will return `DEAD`. This helps
-/// provide assurance that your peer has not lost its memory between steps of a
-/// multi-step IPC sequence.
-///
-/// If the IPC can be retried against a fresh instance of the peer, it's
-/// reasonable to simply increment the generation number and try again, using
-/// `TaskId::next_generation`.
-///
-/// The task index is in the lower `TaskId::INDEX_BITS` bits, while the
-/// generation is in the remaining top bits.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct TaskId(pub u16);
-
-impl TaskId {
-    /// The all-ones `TaskId` is reserved to represent the "virtual kernel
-    /// task."
-    pub const KERNEL: Self = Self(!0);
-
-    /// Reserved TaskId for an unbound userlib::task_slot!()
-    pub const UNBOUND: Self = Self(Self::INDEX_MASK - 1);
-
-    /// Number of bits in a `TaskId` used to represent task index, rather than
-    /// generation number. This must currently be 15 or smaller.
-    pub const INDEX_BITS: u32 = 10;
-
-    /// Derived mask of the index bits portion.
-    pub const INDEX_MASK: u16 = (1 << Self::INDEX_BITS) - 1;
-
-    /// Fabricates a `TaskId` for a known index and generation number.
-    pub fn for_index_and_gen(index: usize, gen: Generation) -> Self {
-        TaskId(
-            (index as u16 & Self::INDEX_MASK)
-                | (gen.0 as u16) << Self::INDEX_BITS,
-        )
-    }
-
-    /// Extracts the index part of this ID.
-    pub fn index(&self) -> usize {
-        usize::from(self.0 & Self::INDEX_MASK)
-    }
-
-    /// Extracts the generation part of this ID.
-    pub fn generation(&self) -> Generation {
-        Generation((self.0 >> Self::INDEX_BITS) as u8)
-    }
-
-    pub fn next_generation(self) -> Self {
-        Self::for_index_and_gen(self.index(), self.generation().next())
-    }
-}
-
-/// Type used to track generation numbers.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
-#[repr(transparent)]
-pub struct Generation(u8);
-
-impl Generation {
-    pub fn next(self) -> Self {
-        const MASK: u16 = 0xFFFF << TaskId::INDEX_BITS >> TaskId::INDEX_BITS;
-        Generation(self.0.wrapping_add(1) & MASK as u8)
-    }
-}
-
-impl From<u8> for Generation {
-    fn from(x: u8) -> Self {
-        Self(x)
-    }
-}
 
 /// Indicates priority of a task.
 ///
@@ -277,14 +204,14 @@ pub const FIRST_DEAD_CODE: u32 = 0xffff_ff00;
 /// This always has the top 24 bits set to 1, with the `generation` in the
 /// bottom 8 bits.
 pub const fn dead_response_code(new_generation: Generation) -> u32 {
-    FIRST_DEAD_CODE | new_generation.0 as u32
+    FIRST_DEAD_CODE | new_generation.as_raw() as u32
 }
 
 /// Utility for checking whether a code indicates that the peer was restarted
 /// and extracting the generation if it is.
 pub const fn extract_new_generation(code: u32) -> Option<Generation> {
     if (code & FIRST_DEAD_CODE) == FIRST_DEAD_CODE {
-        Some(Generation(code as u8))
+        Generation::from_raw(code as RawGeneration)
     } else {
         None
     }

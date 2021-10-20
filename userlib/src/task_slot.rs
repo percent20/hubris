@@ -1,5 +1,6 @@
 use self::volatile_const::VolatileConst;
-use abi::{Generation, TaskId};
+use crate::TaskTableIndexExt;
+use abi::{Generation, RawTaskTableIndex, TaskId, TaskTableIndex};
 
 mod volatile_const {
     /// Wraps a T which is expected to be constant at runtime but may change
@@ -55,18 +56,19 @@ mod volatile_const {
 /// task's identifying information by a post-compile process.  These
 /// placeholders can then be converted into TaskId at runtime.
 #[repr(C)]
-pub struct TaskSlot(VolatileConst<u16>);
+pub struct TaskSlot(VolatileConst<RawTaskTableIndex>);
 
 impl TaskSlot {
     /// A TaskSlot that has not been resolved by a later processing step.
     ///
     /// Calling get_task_id() on an unbound TaskSlot will panic.
-    pub const UNBOUND: Self = Self(VolatileConst::new(TaskId::UNBOUND.0));
+    pub const UNBOUND: Self =
+        Self(VolatileConst::new(TaskTableIndex::UNBOUND.as_raw()));
 
     pub fn get_task_id(&self) -> TaskId {
         let task_index = self.get_task_index();
 
-        if task_index == TaskId::UNBOUND.0 {
+        if task_index == TaskTableIndex::UNBOUND {
             panic!("Attempted to get task id of unbound TaskSlot");
         }
 
@@ -75,8 +77,12 @@ impl TaskSlot {
         crate::sys_refresh_task_id(prototype)
     }
 
-    pub fn get_task_index(&self) -> u16 {
-        self.0.get()
+    pub fn get_task_index(&self) -> TaskTableIndex {
+        let task_index = self.0.get();
+        match TaskTableIndex::checked_from_raw(task_index) {
+            Some(x) => x,
+            None => panic!("TaskSlot value out of range for a TaskTableIndex"),
+        }
     }
 }
 

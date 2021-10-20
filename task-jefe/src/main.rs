@@ -162,7 +162,7 @@ fn main() -> ! {
             }
         } else {
             // ...huh. A task has sent a message to us. That seems wrong.
-            sys_log!("Unexpected message from {}", msginfo.sender.0);
+            sys_log!("Unexpected message from {}", msginfo.sender);
         }
     }
 }

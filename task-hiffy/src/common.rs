@@ -2,7 +2,7 @@ use hif::{Failure, Fault};
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "spi")] {
-        use userlib::{sys_refresh_task_id, Generation, TaskId, NUM_TASKS};
+        use userlib::{Generation, TaskId, TaskIdExt, TaskTableIndex, TaskTableIndexExt, NUM_TASKS};
     }
 }
 
@@ -55,14 +55,11 @@ fn spi_args(stack: &[Option<u32>]) -> Result<(TaskId, usize), Failure> {
 
     let task = match stack[fp + 0] {
         Some(task) => {
-            if task >= NUM_TASKS as u32 {
+            if let Some(index) = TaskTableIndex::checked_from_raw(task as u16) {
+                TaskId::from_index(index)
+            } else {
                 return Err(Failure::Fault(Fault::BadParameter(0)));
             }
-
-            let prototype =
-                TaskId::for_index_and_gen(task as usize, Generation::default());
-
-            sys_refresh_task_id(prototype)
         }
         None => {
             return Err(Failure::Fault(Fault::EmptyParameter(0)));
