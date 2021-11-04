@@ -2,8 +2,65 @@
 
 #![no_std]
 
+use core::convert::TryFrom;
+use paste::paste;
 use serde::{Deserialize, Serialize};
+use static_assertions::const_assert;
 use zerocopy::{AsBytes, FromBytes, Unaligned};
+
+const fn bit_size_of<T>() -> usize {
+    core::mem::size_of::<T>() * 8
+}
+
+pub trait UnsafeFromUintTruncated<T> {
+    unsafe fn from_uint_truncated(val: T) -> Self;
+}
+
+macro_rules! impl_from_smaller_uint {
+    ($name:ty, $uint:ty) => {
+        const_assert!(bit_size_of::<$uint>() <= <$name>::BIT_WIDTH);
+
+        impl From<$uint> for $name {
+            fn from(val: $uint) -> Self {
+                Self(val.into())
+            }
+        }
+    };
+}
+
+macro_rules! impl_try_from_larger_uint {
+    ($name:ty, $uint:ty) => {
+        paste! {
+            const_assert!(bit_size_of::<$uint>() > <$name>::BIT_WIDTH);
+
+            impl TryFrom<$uint> for $name {
+                type Error = ();
+
+                fn try_from(val: $uint) -> Result<Self, Self::Error> {
+                    if val <= (Self::RAW_MAX as $uint) {
+                        Ok(Self(val as [< Raw $name >]))
+                    } else {
+                        Err(())
+                    }
+                }
+            }
+        }
+    };
+}
+
+macro_rules! impl_into_larger_uint {
+    ($name:ty, $uint:ty) => {
+        paste! {
+            const_assert!(bit_size_of::<$uint>() > <$name>::BIT_WIDTH);
+
+            impl From<$name> for $uint {
+                fn from(val: $name) -> $uint {
+                    val.0 as $uint
+                }
+            }
+        }
+    };
+}
 
 /// Magic number that appears at the start of an application header (`App`) to
 /// reassure the kernel that it is not reading uninitialized Flash.
@@ -15,6 +72,72 @@ pub const CURRENT_APP_MAGIC: u32 = 0x1DE_fa7a1;
 pub const REGIONS_PER_TASK: usize = 8;
 
 pub const TASK_ID_INDEX_BITS: usize = 10;
+
+pub type RawTaskTableIndex = u16;
+const_assert!(TaskTableIndex::BIT_WIDTH <= bit_size_of::<RawTaskTableIndex>());
+
+/// Names a slot in the kernel's task table.
+///
+/// NOTE: The value is only checked if it is in range of the TaskTableIndex
+/// type, not whether it is a valid index in the kernel's task table.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(transparent)]
+pub struct TaskTableIndex(RawTaskTableIndex);
+
+impl TaskTableIndex {
+    const BIT_WIDTH: usize = 10;
+    const BIT_MASK: RawTaskTableIndex = (1 << Self::BIT_WIDTH) - 1;
+
+    const RAW_MIN: RawTaskTableIndex = 0;
+    const RAW_MAX: RawTaskTableIndex = (1 << Self::BIT_WIDTH) - 1;
+
+    /// Reserved TaskTableIndex for the kernel itself.
+    ///
+    /// NOTE: The kernel's task table does not actually include an entry for
+    /// itself so this value must not be used to directly index into the table.
+    pub const KERNEL: Self = Self(Self::RAW_MAX);
+
+    /// Reserved TaskTableIndex for an unbound userlib::task_slot!()
+    pub const UNBOUND: Self = Self(Self::RAW_MAX - 1);
+}
+
+impl core::fmt::Display for TaskTableIndex {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "TaskTableIndex({})", self.0)
+    }
+}
+
+impl_from_smaller_uint!(TaskTableIndex, u8);
+impl_try_from_larger_uint!(TaskTableIndex, u16);
+impl_try_from_larger_uint!(TaskTableIndex, u32);
+impl_try_from_larger_uint!(TaskTableIndex, usize);
+impl_into_larger_uint!(TaskTableIndex, u16);
+impl_into_larger_uint!(TaskTableIndex, u32);
+impl_into_larger_uint!(TaskTableIndex, usize);
+
+macro_rules! impl_task_table_index_unsafe_from_uint_truncated {
+    ($uint:ty) => {
+        impl UnsafeFromUintTruncated<$uint> for TaskTableIndex {
+            /// Construct a task table index from a raw integer by truncating the value.
+            ///
+            /// SAFETY
+            ///
+            /// This function is unsafe since out of range values may result in
+            /// undefined behavior.  Out of range values will be truncated causing them
+            /// to be aliased back into the valid range.  If such an aliased value is
+            /// used to construct a TaskId which is then used as the destination of a
+            /// IPC message, undefined behavior can result if the payload cannot be
+            /// distinguished from a valid payload by the aliased task.
+            unsafe fn from_uint_truncated(val: $uint) -> Self {
+                Self(val as RawTaskTableIndex & Self::BIT_MASK)
+            }
+        }
+    };
+}
+
+impl_task_table_index_unsafe_from_uint_truncated!(u16);
+impl_task_table_index_unsafe_from_uint_truncated!(u32);
+impl_task_table_index_unsafe_from_uint_truncated!(usize);
 
 pub type RawTaskId = u16;
 
