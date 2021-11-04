@@ -16,6 +16,8 @@ pub const REGIONS_PER_TASK: usize = 8;
 
 pub const TASK_ID_INDEX_BITS: usize = 10;
 
+pub type RawTaskId = u16;
+
 /// Names a particular incarnation of a task.
 ///
 /// A `TaskId` combines two fields, a task index (which can be predicted at
@@ -33,7 +35,7 @@ pub const TASK_ID_INDEX_BITS: usize = 10;
 /// The task index is in the lower `TaskId::INDEX_BITS` bits, while the
 /// generation is in the remaining top bits.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct TaskId(pub u16);
+pub struct TaskId(pub RawTaskId);
 
 impl TaskId {
     /// The all-ones `TaskId` is reserved to represent the "virtual kernel
