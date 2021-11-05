@@ -32,7 +32,7 @@ fn spi_args(stack: &[Option<u32>]) -> Result<(TaskId, usize), Failure> {
             }
 
             let prototype =
-                TaskId::for_index_and_gen(task as usize, Generation::default());
+                TaskId::for_index_and_gen(task as usize, Generation::MIN);
 
             sys_refresh_task_id(prototype)
         }

@@ -16,6 +16,10 @@ pub trait UnsafeFromUintTruncated<T> {
     unsafe fn from_uint_truncated(val: T) -> Self;
 }
 
+pub trait FromUintTruncated<T> {
+    fn from_uint_truncated(val: T) -> Self;
+}
+
 macro_rules! impl_from_smaller_uint {
     ($name:ty, $uint:ty) => {
         const_assert!(bit_size_of::<$uint>() <= <$name>::BIT_WIDTH);
@@ -139,6 +143,74 @@ impl_task_table_index_unsafe_from_uint_truncated!(u16);
 impl_task_table_index_unsafe_from_uint_truncated!(u32);
 impl_task_table_index_unsafe_from_uint_truncated!(usize);
 
+pub type RawGeneration = u8;
+const_assert!(Generation::BIT_WIDTH <= bit_size_of::<RawGeneration>());
+
+/// Type used to track generation numbers.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(transparent)]
+pub struct Generation(RawGeneration);
+
+impl Generation {
+    const BIT_WIDTH: usize =
+        bit_size_of::<RawTaskId>() - TaskTableIndex::BIT_WIDTH;
+    const BIT_MASK: RawGeneration = (1 << Self::BIT_WIDTH) - 1;
+
+    const RAW_MIN: RawGeneration = 0;
+    const RAW_MAX: RawGeneration = (1 << Self::BIT_WIDTH) - 1;
+
+    /// Smallest representable generation value
+    pub const MIN: Self = Self(Self::RAW_MIN);
+
+    /// Return the next sequential generation number, wrapping at the boundary
+    /// of the type.
+    pub const fn next(&self) -> Self {
+        match self.0.wrapping_add(1) {
+            x @ Self::RAW_MIN..=Self::RAW_MAX => Self(x),
+            _ => Self::MIN,
+        }
+    }
+}
+
+impl core::fmt::Display for Generation {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Generation({})", self.0)
+    }
+}
+
+impl_try_from_larger_uint!(Generation, u8);
+impl_try_from_larger_uint!(Generation, u16);
+impl_try_from_larger_uint!(Generation, u32);
+impl_try_from_larger_uint!(Generation, usize);
+impl_into_larger_uint!(Generation, u8);
+impl_into_larger_uint!(Generation, u16);
+impl_into_larger_uint!(Generation, u32);
+impl_into_larger_uint!(Generation, usize);
+
+macro_rules! impl_generation_from_uint_truncated {
+    ($uint:ty) => {
+        impl FromUintTruncated<$uint> for Generation {
+            /// Construct a Generation from a raw integer by truncating the value
+            ///
+            /// SAFETY
+            ///
+            /// This function is safe since out of range values will be aliased back
+            /// into the valid range.  If such an aliased instance is used to construct
+            /// a TaskId which is sent a message, the target task will be the same and
+            /// will accept the same payload.  Such a situation is no different than
+            /// when a TaskId becomes invalid due to the target task restarting.
+            fn from_uint_truncated(val: $uint) -> Self {
+                Self(val as RawGeneration & Self::BIT_MASK)
+            }
+        }
+    };
+}
+
+impl_generation_from_uint_truncated!(u8);
+impl_generation_from_uint_truncated!(u16);
+impl_generation_from_uint_truncated!(u32);
+impl_generation_from_uint_truncated!(usize);
+
 pub type RawTaskId = u16;
 
 /// Names a particular incarnation of a task.
@@ -179,7 +251,7 @@ impl TaskId {
     pub fn for_index_and_gen(index: usize, gen: Generation) -> Self {
         TaskId(
             (index as u16 & Self::INDEX_MASK)
-                | (gen.0 as u16) << Self::INDEX_BITS,
+                | (u16::from(gen) << Self::INDEX_BITS),
         )
     }
 
@@ -190,29 +262,11 @@ impl TaskId {
 
     /// Extracts the generation part of this ID.
     pub fn generation(&self) -> Generation {
-        Generation((self.0 >> Self::INDEX_BITS) as u8)
+        Generation::from_uint_truncated(self.0 >> Self::INDEX_BITS)
     }
 
     pub fn next_generation(self) -> Self {
         Self::for_index_and_gen(self.index(), self.generation().next())
-    }
-}
-
-/// Type used to track generation numbers.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
-#[repr(transparent)]
-pub struct Generation(u8);
-
-impl Generation {
-    pub fn next(self) -> Self {
-        const MASK: u16 = 0xFFFF << TaskId::INDEX_BITS >> TaskId::INDEX_BITS;
-        Generation(self.0.wrapping_add(1) & MASK as u8)
-    }
-}
-
-impl From<u8> for Generation {
-    fn from(x: u8) -> Self {
-        Self(x)
     }
 }
 
@@ -401,15 +455,18 @@ pub const FIRST_DEAD_CODE: u32 = 0xffff_ff00;
 ///
 /// This always has the top 24 bits set to 1, with the `generation` in the
 /// bottom 8 bits.
-pub const fn dead_response_code(new_generation: Generation) -> u32 {
-    FIRST_DEAD_CODE | new_generation.0 as u32
+pub fn dead_response_code(new_generation: Generation) -> u32 {
+    FIRST_DEAD_CODE | u32::from(new_generation)
 }
 
 /// Utility for checking whether a code indicates that the peer was restarted
 /// and extracting the generation if it is.
-pub const fn extract_new_generation(code: u32) -> Option<Generation> {
+pub fn extract_new_generation(code: u32) -> Option<Generation> {
     if (code & FIRST_DEAD_CODE) == FIRST_DEAD_CODE {
-        Some(Generation(code as u8))
+        match Generation::try_from(code as u8) {
+            Ok(x) => Some(x),
+            Err(_) => None,
+        }
     } else {
         None
     }

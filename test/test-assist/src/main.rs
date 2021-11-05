@@ -244,7 +244,7 @@ fn main() -> ! {
                         caller.reply(0);
                         let _ = sys_refresh_task_id(TaskId::for_index_and_gen(
                             NUM_TASKS,
-                            Generation::default(),
+                            Generation::MIN,
                         ));
                         panic!("unexpectedly survived {:?}", op);
                     }
@@ -253,7 +253,7 @@ fn main() -> ! {
                         caller.reply(0);
                         let _ = sys_refresh_task_id(TaskId::for_index_and_gen(
                             usize::MAX,
-                            Generation::default(),
+                            Generation::MIN,
                         ));
                         panic!("unexpectedly survived {:?}", op);
                     }

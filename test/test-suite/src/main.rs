@@ -468,11 +468,11 @@ fn test_restart_taskgen() {
 
     assert_eq!(rc & 0xffff_ff00, 0xffff_ff00);
     assert_eq!(len, 0);
-    assert_ne!(assist.generation(), Generation::from((rc & 0xff) as u8));
+    assert_ne!(assist.generation(), Generation::from_uint_truncated(rc));
 
     assert_eq!(
         assist_task_id().generation(),
-        Generation::from((rc & 0xff) as u8)
+        Generation::from_uint_truncated(rc)
     );
 }
 

@@ -71,7 +71,7 @@ impl TaskSlot {
         }
 
         let prototype =
-            TaskId::for_index_and_gen(task_index.into(), Generation::default());
+            TaskId::for_index_and_gen(task_index.into(), Generation::MIN);
         crate::sys_refresh_task_id(prototype)
     }
 

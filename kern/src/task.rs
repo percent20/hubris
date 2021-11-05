@@ -3,8 +3,8 @@
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use abi::{
-    FaultInfo, FaultSource, Generation, Priority, SchedState, TaskId,
-    TaskState, UsageError,
+    FaultInfo, FaultSource, FromUintTruncated, Generation, Priority,
+    SchedState, TaskId, TaskState, UsageError,
 };
 use zerocopy::FromBytes;
 
@@ -296,8 +296,7 @@ impl Task {
 
     /// Returns this task's current generation number.
     pub fn generation(&self) -> Generation {
-        const MASK: u8 = ((1u32 << (16 - TaskId::INDEX_BITS)) - 1) as u8;
-        Generation::from(self.generation as u8 & MASK)
+        Generation::from_uint_truncated(self.generation)
     }
 
     /// Returns a reference to this task's current state, for inspection.

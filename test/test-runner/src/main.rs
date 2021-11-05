@@ -258,10 +258,7 @@ fn restart_tester() {
 
 /// Gets a `TaskId` to the testsuite in its current generation.
 fn tester_task_id() -> TaskId {
-    sys_refresh_task_id(TaskId::for_index_and_gen(
-        TEST_TASK,
-        Generation::default(),
-    ))
+    sys_refresh_task_id(TaskId::for_index_and_gen(TEST_TASK, Generation::MIN))
 }
 
 /// Contacts the test suite to get the number of defined cases.
